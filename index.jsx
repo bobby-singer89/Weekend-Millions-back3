@@ -53,7 +53,7 @@ const broadcastJackpot = async () => {
       }
     });
   } catch (error) {
-    console.error('Ошибка рассылки джекпота:', error.message);
+    console.error('Ошибка рассылки джекпота:', error);
   }
 };
 
@@ -92,7 +92,7 @@ app.post('/buy-tickets', async (req, res) => {
 
     res.json({ success: true, ticketIds });
   } catch (error) {
-    console.error('Ошибка /buy-tickets:', error.message);
+    console.error('Ошибка /buy-tickets:', error);
     res.status(500).json({ success: false, error: error.message || 'Ошибка базы данных' });
   }
 });
@@ -118,7 +118,7 @@ app.get('/my-tickets', async (req, res) => {
     );
     res.json({ success: true, tickets: result.rows });
   } catch (error) {
-    console.error('Ошибка /my-tickets:', error.message);
+    console.error('Ошибка /my-tickets:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -207,7 +207,7 @@ app.post('/draw', async (req, res) => {
                 `Поздравляем!`
               );
             } catch (e) {
-              console.error('Ошибка уведомления:', e);
+              console('Ошибка уведомления:', e);
             }
           }
         }
@@ -233,7 +233,7 @@ app.post('/draw', async (req, res) => {
       prizes
     });
   } catch (error) {
-    console.error('Ошибка розыгрыша:', error);
+    console('Ошибка розыгрыша:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -246,7 +246,7 @@ app.get('/draw-history', async (req, res) => {
     );
     res.json({ success: true, draws: result.rows });
   } catch (error) {
-    console.error('Ошибка /draw-history:', error.message);
+    console('Ошибка /draw-history:', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -259,7 +259,7 @@ app.get('/jackpot', async (req, res) => {
     const jackpot = 1000 + (totalTickets * 0.25); // 1000 стартовых + 25%
     res.json({ success: true, jackpot });
   } catch (error) {
-    console.error('Ошибка /jackpot:', error.message);
+    console('Ошибка /jackpot:', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });
