@@ -6,18 +6,15 @@ const { Telegraf } = require('telegraf');
 const WebSocket = require('ws');
 
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000; // Render сам назначает порт, используй переменную
 
 app.use(cors());
 app.use(express.json());
 
-// Подключение к PostgreSQL
+// Подключение к PostgreSQL (используем полный DATABASE_URL из env)
 const pool = new Pool({
-  user: process.env.DB_USER,
-  host: process.env.DB_HOST,
-  database: process.env.DB_NAME,
-  password: process.env.DB_PASSWORD,
-  port: process.env.DB_PORT,
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false } // для Neon важно
 });
 
 // Telegram-бот
@@ -37,13 +34,11 @@ wss.on('connection', (ws) => {
   ws.on('close', () => console.log('Клиент отключился'));
 });
 
-// Функция рассылки обновления джекпота всем клиентам
+// Функция рассылки обновления джекпота
 const broadcastJackpot = async () => {
   try {
     const result = await pool.query('SELECT COUNT(*) AS total FROM tickets WHERE paid = true');
     const totalTickets = parseInt(result.rows[0].total, 10);
-    
-    // Начальный джекпот 1000 TON + 25% от всех оплаченных билетов
     const jackpot = 1000 + (totalTickets * 0.25);
 
     const data = { type: 'jackpotUpdate', jackpot };
@@ -54,6 +49,7 @@ const broadcastJackpot = async () => {
     });
   } catch (error) {
     console.error('Ошибка рассылки джекпота:', error);
+    console.error(error.stack);
   }
 };
 
@@ -87,12 +83,12 @@ app.post('/buy-tickets', async (req, res) => {
       ticketIds.push(result.rows[0].id);
     }
 
-    // Рассылка обновления джекпота
     broadcastJackpot();
 
     res.json({ success: true, ticketIds });
   } catch (error) {
     console.error('Ошибка /buy-tickets:', error);
+    console.error(error.stack);
     res.status(500).json({ success: false, error: error.message || 'Ошибка базы данных' });
   }
 });
@@ -119,6 +115,7 @@ app.get('/my-tickets', async (req, res) => {
     res.json({ success: true, tickets: result.rows });
   } catch (error) {
     console.error('Ошибка /my-tickets:', error);
+    console.error(error.stack);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -126,7 +123,6 @@ app.get('/my-tickets', async (req, res) => {
 // Розыгрыш
 app.post('/draw', async (req, res) => {
   try {
-    // Получаем все оплаченные билеты
     const ticketsResult = await pool.query(
       'SELECT id, user_id, numbers FROM tickets WHERE paid = true'
     );
@@ -136,7 +132,6 @@ app.post('/draw', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Нет оплаченных билетов' });
     }
 
-    // Генерируем выигрышные числа (5 уникальных от 1 до 33)
     const winningNumbers = [];
     while (winningNumbers.length < 5) {
       const num = Math.floor(Math.random() * 33) + 1;
@@ -144,7 +139,6 @@ app.post('/draw', async (req, res) => {
     }
     winningNumbers.sort((a, b) => a - b);
 
-    // Считаем совпадения и призы
     const prizeDistribution = {
       5: 0.40,
       4: 0.30,
@@ -165,22 +159,19 @@ app.post('/draw', async (req, res) => {
       }
     });
 
-    // Расчёт призов
-    const totalFund = tickets.length * 0.5; // 50% от билетов
+    const totalFund = tickets.length * 0.5;
     const prizes = {};
     for (let matches = 1; matches <= 5; matches++) {
       const percentage = prizeDistribution[matches] || 0;
       prizes[matches] = totalFund * percentage;
     }
 
-    // Сохраняем розыгрыш
     const drawResult = await pool.query(
       'INSERT INTO draws (winning_numbers) VALUES ($1) RETURNING id',
       [winningNumbers]
     );
     const drawId = drawResult.rows[0].id;
 
-    // Сохраняем результаты призов
     const prizeResults = [];
     for (let matches = 1; matches <= 5; matches++) {
       const winners = winnersByMatches[matches];
@@ -195,7 +186,6 @@ app.post('/draw', async (req, res) => {
             prize: prizePerWinner
           });
 
-          // Уведомление победителю
           if (winner.user_id && winner.user_id !== 0) {
             try {
               await bot.telegram.sendMessage(
@@ -207,14 +197,14 @@ app.post('/draw', async (req, res) => {
                 `Поздравляем!`
               );
             } catch (e) {
-              console('Ошибка уведомления:', e);
+              console.error('Ошибка уведомления:', e);
+              console.error(e.stack);
             }
           }
         }
       }
     }
 
-    // Сохраняем результаты призов в БД (новая таблица prize_results)
     for (const prize of prizeResults) {
       await pool.query(
         'INSERT INTO prize_results (draw_id, ticket_id, user_id, matches, prize) VALUES ($1, $2, $3, $4, $5)',
@@ -222,7 +212,6 @@ app.post('/draw', async (req, res) => {
       );
     }
 
-    // Обновляем джекпот (обнуляем или оставляем начальный)
     broadcastJackpot();
 
     res.json({
@@ -233,7 +222,8 @@ app.post('/draw', async (req, res) => {
       prizes
     });
   } catch (error) {
-    console('Ошибка розыгрыша:', error);
+    console.error('Ошибка розыгрыша:', error);
+    console.error(error.stack);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -246,21 +236,23 @@ app.get('/draw-history', async (req, res) => {
     );
     res.json({ success: true, draws: result.rows });
   } catch (error) {
-    console('Ошибка /draw-history:', error.message);
+    console.error('Ошибка /draw-history:', error);
+    console.error(error.stack);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Новый эндпоинт для джекпота (для начальной загрузки)
+// Джекпот
 app.get('/jackpot', async (req, res) => {
   try {
     const result = await pool.query('SELECT COUNT(*) AS total FROM tickets WHERE paid = true');
     const totalTickets = parseInt(result.rows[0].total, 10);
-    const jackpot = 1000 + (totalTickets * 0.25); // 1000 стартовых + 25%
+    const jackpot = 1000 + (totalTickets * 0.25);
     res.json({ success: true, jackpot });
   } catch (error) {
-    console('Ошибка /jackpot:', error.message);
-    res.status(500).json({ success: false, error: error.message });
+    console.error('Ошибка /jackpot:', error);
+    console.error(error.stack);
+    res.status(500).json({ success: false, error: error.message || 'Database error' });
   }
 });
 
