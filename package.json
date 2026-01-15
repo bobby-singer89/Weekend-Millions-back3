@@ -1,26 +1,27 @@
 {
-  "name": "lottery-project",
+  "name": "lottery-backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Backend для лотереи Weekend Millions (Express + Telegraf + PostgreSQL + WebSocket)",
+  "main": "index.jsx",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.jsx",
+    "dev": "nodemon index.jsx"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
     "cors": "^2.8.5",
-    "dotenv": "^17.2.3",
-    "express": "^5.2.1",
-    "node-telegram-bot-api": "^0.63.0",
-    "pg": "^8.16.3",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "pg": "^8.12.0",
     "telegraf": "^4.16.3",
-    "ws": "^8.19.0"
+    "ws": "^8.18.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.11",
-    "typescript": "^5.9.3"
-  }
+    "nodemon": "^3.1.7"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "Bobby",
+  "license": "ISC"
 }
