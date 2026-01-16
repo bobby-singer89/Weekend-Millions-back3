@@ -26,8 +26,11 @@ bot.on('text', (ctx) => {
 
 console.log('Telegram бот запущен!');
 
-// WebSocket сервер (порт 8080)
-const wss = new WebSocket.Server({ port: 8080 });
+const server = app.listen(port, () => {
+  console.log(`Сервер запущен на http://localhost:${port}`);
+});
+
+const wss = new WebSocket.Server({ server }); // ← теперь WS на том же порту, что HTTP
 
 wss.on('connection', (ws) => {
   console.log('Клиент подключился к WebSocket');
