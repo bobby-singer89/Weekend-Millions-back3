@@ -6,15 +6,23 @@ const { Telegraf } = require('telegraf');
 const WebSocket = require('ws');
 
 const app = express();
-const port = process.env.PORT || 3000; // Render сам назначает порт, используй переменную
+
+// Порт из Render (обязательно!)
+const port = process.env.PORT || 3000;
+
+// Запускаем сервер ОДИН раз
+const server = app.listen(port, () => {
+  console.log(`Сервер запущен на порту ${port}`);
+  console.log('PORT из env:', process.env.PORT || '(не задан, используется 3000)');
+});
 
 app.use(cors());
 app.use(express.json());
 
-// Подключение к PostgreSQL (используем полный DATABASE_URL из env)
+// Подключение к PostgreSQL
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false } // для Neon важно
+  ssl: { rejectUnauthorized: false } // для Neon обязательно
 });
 
 // Telegram-бот
@@ -26,11 +34,8 @@ bot.on('text', (ctx) => {
 
 console.log('Telegram бот запущен!');
 
-const server = app.listen(port, () => {
-  console.log(`Сервер запущен на http://localhost:${port}`);
-});
-
-const wss = new WebSocket.Server({ server }); // ← теперь WS на том же порту, что HTTP
+// WebSocket на том же сервере (без отдельного порта 8080)
+const wss = new WebSocket.Server({ server });
 
 wss.on('connection', (ws) => {
   console.log('Клиент подключился к WebSocket');
@@ -51,8 +56,8 @@ const broadcastJackpot = async () => {
       }
     });
   } catch (error) {
-    console.error('Ошибка рассылки джекпота:', error);
-    console.error(error.stack);
+    console.error('Ошибка рассылки джекпота:', error.message || error);
+    console.error('Стек:', error.stack);
   }
 };
 
@@ -90,175 +95,12 @@ app.post('/buy-tickets', async (req, res) => {
 
     res.json({ success: true, ticketIds });
   } catch (error) {
-    console.error('Ошибка /buy-tickets:', error);
-    console.error(error.stack);
+    console.error('Ошибка /buy-tickets:', error.message || error);
+    console.error('Стек:', error.stack);
     res.status(500).json({ success: false, error: error.message || 'Ошибка базы данных' });
   }
 });
 
-// История билетов пользователя
-app.get('/my-tickets', async (req, res) => {
-  const { userId } = req.query;
+// ... (остальные эндпоинты /my-tickets, /draw, /draw-history, /jackpot — оставь как есть)
 
-  if (!userId || isNaN(Number(userId))) {
-    return res.status(400).json({ success: false, error: 'Неверный userId' });
-  }
-
-  const numericUserId = Number(userId);
-
-  if (numericUserId === 0) {
-    return res.json({ success: true, tickets: [] });
-  }
-
-  try {
-    const result = await pool.query(
-      'SELECT id, numbers, created_at, paid, tx_hash FROM tickets WHERE user_id = $1 ORDER BY created_at DESC',
-      [numericUserId]
-    );
-    res.json({ success: true, tickets: result.rows });
-  } catch (error) {
-    console.error('Ошибка /my-tickets:', error);
-    console.error(error.stack);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// Розыгрыш
-app.post('/draw', async (req, res) => {
-  try {
-    const ticketsResult = await pool.query(
-      'SELECT id, user_id, numbers FROM tickets WHERE paid = true'
-    );
-    const tickets = ticketsResult.rows;
-
-    if (tickets.length === 0) {
-      return res.status(400).json({ success: false, error: 'Нет оплаченных билетов' });
-    }
-
-    const winningNumbers = [];
-    while (winningNumbers.length < 5) {
-      const num = Math.floor(Math.random() * 33) + 1;
-      if (!winningNumbers.includes(num)) winningNumbers.push(num);
-    }
-    winningNumbers.sort((a, b) => a - b);
-
-    const prizeDistribution = {
-      5: 0.40,
-      4: 0.30,
-      3: 0.20,
-      2: 0.08,
-      1: 0.02
-    };
-
-    const winnersByMatches = {};
-    for (let matches = 1; matches <= 5; matches++) {
-      winnersByMatches[matches] = [];
-    }
-
-    tickets.forEach(ticket => {
-      const matches = ticket.numbers.filter(num => winningNumbers.includes(num)).length;
-      if (matches >= 1) {
-        winnersByMatches[matches].push(ticket);
-      }
-    });
-
-    const totalFund = tickets.length * 0.5;
-    const prizes = {};
-    for (let matches = 1; matches <= 5; matches++) {
-      const percentage = prizeDistribution[matches] || 0;
-      prizes[matches] = totalFund * percentage;
-    }
-
-    const drawResult = await pool.query(
-      'INSERT INTO draws (winning_numbers) VALUES ($1) RETURNING id',
-      [winningNumbers]
-    );
-    const drawId = drawResult.rows[0].id;
-
-    const prizeResults = [];
-    for (let matches = 1; matches <= 5; matches++) {
-      const winners = winnersByMatches[matches];
-      if (winners.length > 0) {
-        const prizePerWinner = prizes[matches] / winners.length;
-        for (const winner of winners) {
-          prizeResults.push({
-            draw_id: drawId,
-            ticket_id: winner.id,
-            user_id: winner.user_id,
-            matches,
-            prize: prizePerWinner
-          });
-
-          if (winner.user_id && winner.user_id !== 0) {
-            try {
-              await bot.telegram.sendMessage(
-                winner.user_id,
-                `🎉 Вы выиграли ${prizePerWinner.toFixed(2)} TON!\n` +
-                `Совпадений: ${matches}\n` +
-                `Выигрышные числа: ${winningNumbers.join(', ')}\n` +
-                `Билет ID: ${winner.id}\n` +
-                `Поздравляем!`
-              );
-            } catch (e) {
-              console.error('Ошибка уведомления:', e);
-              console.error(e.stack);
-            }
-          }
-        }
-      }
-    }
-
-    for (const prize of prizeResults) {
-      await pool.query(
-        'INSERT INTO prize_results (draw_id, ticket_id, user_id, matches, prize) VALUES ($1, $2, $3, $4, $5)',
-        [prize.draw_id, prize.ticket_id, prize.user_id, prize.matches, prize.prize]
-      );
-    }
-
-    broadcastJackpot();
-
-    res.json({
-      success: true,
-      drawId,
-      winningNumbers,
-      winnersByMatches,
-      prizes
-    });
-  } catch (error) {
-    console.error('Ошибка розыгрыша:', error);
-    console.error(error.stack);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// История розыгрышей
-app.get('/draw-history', async (req, res) => {
-  try {
-    const result = await pool.query(
-      'SELECT id, winning_numbers, winner_ticket_id, draw_date FROM draws ORDER BY draw_date DESC LIMIT 10'
-    );
-    res.json({ success: true, draws: result.rows });
-  } catch (error) {
-    console.error('Ошибка /draw-history:', error);
-    console.error(error.stack);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// Джекпот
-app.get('/jackpot', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT COUNT(*) AS total FROM tickets WHERE paid = true');
-    const totalTickets = parseInt(result.rows[0].total, 10);
-    const jackpot = 1000 + (totalTickets * 0.25);
-    res.json({ success: true, jackpot });
-  } catch (error) {
-    console.error('Ошибка /jackpot:', error);
-    console.error(error.stack);
-    res.status(500).json({ success: false, error: error.message || 'Database error' });
-  }
-});
-
-app.listen(port, () => {
-  console.log(`Сервер запущен на http://localhost:${port}`);
-});
+console.log('Сервер готов к работе!');
